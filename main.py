@@ -100,6 +100,8 @@ async def webhook(request: Request):
 
 @app_fastapi.on_event("startup")
 async def startup():
+    await telegram_app.initialize()
+    await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
 if __name__ == "__main__":
