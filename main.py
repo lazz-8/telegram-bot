@@ -10,9 +10,11 @@ import yt_dlp
 # ===== إعدادات =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
+
+# اسم مطور البوت للتواصل
+DEVELOPER_USERNAME = "@hos_ine"  # ضع هنا اسم حسابك على Telegram
 
 logging.basicConfig(level=logging.INFO)
 
@@ -51,15 +53,10 @@ def download_video(url):
         info = ydl.extract_info(url, download=True)
         return ydl.prepare_filename(info)
 
-# ===== التحقق من الاشتراك =====
+# ===== تعديل: لا تحقق اشتراك =====
 async def check_subscription(update, context):
-    user_id = update.effective_user.id
-    chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
-    if chat_member.status in ["member", "administrator", "creator"]:
-        return True
-    else:
-        await update.message.reply_text(f"🚫 اشترك أولاً في القناة:\n{CHANNEL_USERNAME}")
-        return False
+    # كل المستخدمين يعتبرون مشتركين
+    return True
 
 # ===== FastAPI =====
 app_fastapi = FastAPI()
@@ -67,18 +64,16 @@ telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user.id, update.effective_user.username)
-    if not await check_subscription(update, context):
-        return
-    await update.message.reply_text("🔥 أرسل رابط TikTok أو Instagram")
+    # رسالة البداية مع اسم مطور البوت
+    await update.message.reply_text(
+        f"🔥 أرسل رابط TikTok أو Instagram\n\n💡 لتطوير البوت أو التواصل:\n{DEVELOPER_USERNAME}"
+    )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         await update.message.reply_text(f"📊 المستخدمين: {get_users_count()}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context):
-        return
-
     url = update.message.text
 
     if "tiktok.com" in url or "instagram.com" in url:
