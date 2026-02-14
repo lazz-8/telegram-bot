@@ -1,26 +1,35 @@
 import os
 import logging
 import sqlite3
+import shutil
 from datetime import datetime
 from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+    filters
+)
 import yt_dlp
 import asyncio
 
 # ===== إعدادات =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
 
-DEVELOPER_USERNAME = "@hos_ine"
+# يمكن تغييره من Railway Environment
+DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "@hos_ine")
 
 logging.basicConfig(level=logging.INFO)
 
 # ===== حماية من السبام =====
 user_last_download = {}
-DOWNLOAD_DELAY = 10  # انتظار 10 ثواني
+DOWNLOAD_DELAY = 10
 
 # ===== قاعدة البيانات =====
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -46,8 +55,10 @@ conn.commit()
 
 # ===== دوال قاعدة البيانات =====
 def add_user(user_id, username):
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, username, join_date) VALUES (?, ?, ?)",
-                   (user_id, username, datetime.now().isoformat()))
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (user_id, username, join_date) VALUES (?, ?, ?)",
+        (user_id, username, datetime.now().isoformat())
+    )
     conn.commit()
 
 def is_banned(user_id):
@@ -73,16 +84,19 @@ def get_all_users():
 
 # ===== تحميل الفيديو =====
 def download_video(url):
-    if not os.path.exists("downloads"):
-        os.makedirs("downloads")
+
+    if os.path.exists("downloads") and len(os.listdir("downloads")) > 30:
+        shutil.rmtree("downloads")
+
+    os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         'outtmpl': 'downloads/%(id)s.%(ext)s',
-        'merge_output_format': 'mp4',
         'noplaylist': True,
         'quiet': True,
-        'nocheckcertificate': True
+        'nocheckcertificate': True,
+        'geo_bypass': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -115,14 +129,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔥 مرحبًا {user.first_name}\n\n"
         "🎬 أرسل رابط:\n"
         "• TikTok\n"
-        "• Instagram (Reels / Posts)\n"
-        "• YouTube / Shorts\n\n"
-        "⚡ التحميل بجودة عالية MP4\n"
-        "⏳ يوجد انتظار 10 ثواني بين كل تحميل"
+        "• Instagram\n"
+        "• YouTube\n\n"
+        "⚡ التحميل بجودة عالية\n"
+        "⏳ يوجد انتظار 10 ثواني بين كل تحميل\n\n"
+        f"👨‍💻 المطور: {DEVELOPER_USERNAME}"
     )
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id == ADMIN_ID:
+    if ADMIN_ID and update.effective_user.id == ADMIN_ID:
         await update.message.reply_text(
             "👑 لوحة تحكم الأدمن",
             reply_markup=admin_keyboard()
@@ -173,31 +188,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if current_time - last_time < DOWNLOAD_DELAY:
         remaining = int(DOWNLOAD_DELAY - (current_time - last_time))
-        await update.message.reply_text(f"⏳ انتظر {remaining} ثانية قبل التحميل مرة أخرى")
+        await update.message.reply_text(f"⏳ انتظر {remaining} ثانية")
         return
 
-    user_last_download[user_id] = current_time
-
     url = update.message.text
-
-    supported_sites = [
-        "tiktok.com",
-        "instagram.com",
-        "youtube.com",
-        "youtu.be"
-    ]
+    supported_sites = ["tiktok.com", "instagram.com", "youtube.com", "youtu.be"]
 
     if any(site in url for site in supported_sites):
 
+        user_last_download[user_id] = current_time
         await update.message.reply_text("⏳ جاري التحميل...")
 
         try:
-            filename = download_video(url)
+            filename = await asyncio.to_thread(download_video, url)
 
             with open(filename, "rb") as video:
                 await update.message.reply_video(
                     video=video,
-                    supports_streaming=True
+                    supports_streaming=True,
+                    caption="✅ تم التحميل بنجاح"
                 )
 
             os.remove(filename)
@@ -228,7 +237,9 @@ async def webhook(request: Request):
 async def startup():
     await telegram_app.initialize()
     await telegram_app.start()
-    await telegram_app.bot.set_webhook(WEBHOOK_URL + "/webhook")
+
+    if WEBHOOK_URL:
+        await telegram_app.bot.set_webhook(WEBHOOK_URL + "/webhook")
 
 if __name__ == "__main__":
     import uvicorn
