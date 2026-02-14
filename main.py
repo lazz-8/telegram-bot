@@ -82,30 +82,51 @@ def get_all_users():
     cursor.execute("SELECT user_id FROM users WHERE banned=0")
     return cursor.fetchall()
 
-# ===== تحميل الفيديو =====
+# ===== تحميل الفيديو (نسخة قوية شاملة) =====
 def download_video(url):
 
+    # تنظيف المجلد إذا كبر
     if os.path.exists("downloads") and len(os.listdir("downloads")) > 30:
         shutil.rmtree("downloads")
 
     os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',
+        # أفضل فيديو + أفضل صوت ثم دمج
+        'format': 'bv*+ba/best',
+        'merge_output_format': 'mp4',
+
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
+
+        # إعادة المحاولة عند الخطأ
+        'retries': 3,
+        'fragment_retries': 3,
+
+        # تحسين دعم إنستغرام
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0'
+        }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return ydl.prepare_filename(info)
 
-# ===== FastAPI =====
-app_fastapi = FastAPI()
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+        # منع الفيديوهات الطويلة أكثر من 30 دقيقة (اختياري)
+        if info.get("duration") and info["duration"] > 1800:
+            raise Exception("الفيديو طويل جداً")
+
+        # الحصول على الاسم الحقيقي بعد الدمج
+        filename = ydl.prepare_filename(info)
+
+        # إذا تم الدمج يتحول الامتداد إلى mp4
+        if not filename.endswith(".mp4"):
+            filename = os.path.splitext(filename)[0] + ".mp4"
+
+        return filename
 
 # ===== لوحة تحكم =====
 def admin_keyboard():
