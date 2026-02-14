@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
 import yt_dlp
+import asyncio
 
 # ===== إعدادات =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -16,6 +17,10 @@ PORT = int(os.getenv("PORT", 8000))
 DEVELOPER_USERNAME = "@hos_ine"
 
 logging.basicConfig(level=logging.INFO)
+
+# ===== حماية من السبام =====
+user_last_download = {}
+DOWNLOAD_DELAY = 10  # انتظار 10 ثواني
 
 # ===== قاعدة البيانات =====
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -50,14 +55,6 @@ def is_banned(user_id):
     row = cursor.fetchone()
     return row and row[0] == 1
 
-def ban_user(user_id):
-    cursor.execute("UPDATE users SET banned=1 WHERE user_id=?", (user_id,))
-    conn.commit()
-
-def unban_user(user_id):
-    cursor.execute("UPDATE users SET banned=0 WHERE user_id=?", (user_id,))
-    conn.commit()
-
 def get_users_count():
     cursor.execute("SELECT COUNT(*) FROM users")
     return cursor.fetchone()[0]
@@ -80,10 +77,12 @@ def download_video(url):
         os.makedirs("downloads")
 
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'merge_output_format': 'mp4',
-        'quiet': True
+        'noplaylist': True,
+        'quiet': True,
+        'nocheckcertificate': True
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -106,7 +105,6 @@ def admin_keyboard():
 # ===== أوامر =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
     add_user(user.id, user.username)
 
     if is_banned(user.id):
@@ -115,8 +113,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"🔥 مرحبًا {user.first_name}\n\n"
-        "🎬 أرسل رابط TikTok / Instagram / YouTube\n"
-        "⚡ وسيتم التحميل بجودة عالية فورًا"
+        "🎬 أرسل رابط:\n"
+        "• TikTok\n"
+        "• Instagram (Reels / Posts)\n"
+        "• YouTube / Shorts\n\n"
+        "⚡ التحميل بجودة عالية MP4\n"
+        "⏳ يوجد انتظار 10 ثواني بين كل تحميل"
     )
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,13 +141,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "broadcast":
         await query.edit_message_text("📢 أرسل الرسالة الآن ليتم بثها لكل المستخدمين")
-
         context.user_data["broadcast"] = True
 
     elif query.data == "close":
         await query.delete_message()
 
-# ===== بث =====
+# ===== معالجة الرسائل =====
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
@@ -154,7 +155,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 أنت محظور")
         return
 
-    # بث
+    # بث جماعي
     if context.user_data.get("broadcast") and user_id == ADMIN_ID:
         users = get_all_users()
         for user in users:
@@ -166,16 +167,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ تم الإرسال للجميع")
         return
 
+    # منع السبام
+    current_time = datetime.now().timestamp()
+    last_time = user_last_download.get(user_id, 0)
+
+    if current_time - last_time < DOWNLOAD_DELAY:
+        remaining = int(DOWNLOAD_DELAY - (current_time - last_time))
+        await update.message.reply_text(f"⏳ انتظر {remaining} ثانية قبل التحميل مرة أخرى")
+        return
+
+    user_last_download[user_id] = current_time
+
     url = update.message.text
 
-    if any(x in url for x in ["tiktok.com", "instagram.com", "youtube.com", "youtu.be"]):
+    supported_sites = [
+        "tiktok.com",
+        "instagram.com",
+        "youtube.com",
+        "youtu.be"
+    ]
+
+    if any(site in url for site in supported_sites):
+
         await update.message.reply_text("⏳ جاري التحميل...")
 
         try:
             filename = download_video(url)
 
             with open(filename, "rb") as video:
-                await update.message.reply_video(video=video, supports_streaming=True)
+                await update.message.reply_video(
+                    video=video,
+                    supports_streaming=True
+                )
 
             os.remove(filename)
             increase_downloads()
@@ -183,8 +206,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text("❌ فشل التحميل")
             print(e)
+
     else:
-        await update.message.reply_text("⚠️ أرسل رابط صالح فقط")
+        await update.message.reply_text("⚠️ أرسل رابط فيديو صالح فقط")
 
 # ===== تسجيل =====
 telegram_app.add_handler(CommandHandler("start", start))
