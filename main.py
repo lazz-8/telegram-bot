@@ -94,15 +94,24 @@ def download_video(url):
     os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        'format': 'bv*+ba/best',
+        # أفضل جودة مناسبة بدون أحجام ضخمة
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+
         'merge_output_format': 'mp4',
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
-        'retries': 3,
-        'fragment_retries': 3,
+
+        # تجنب مشاكل YouTube
+        'retries': 5,
+        'fragment_retries': 5,
+        'ignoreerrors': False,
+
+        # تقليل الجودة إذا كان الحجم كبير
+        'format_sort': ['res:720', 'ext:mp4:m4a'],
+
         'http_headers': {
             'User-Agent': 'Mozilla/5.0'
         }
@@ -111,7 +120,8 @@ def download_video(url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
-        if info.get("duration") and info["duration"] > 1800:
+        # منع الفيديوهات الطويلة أكثر من 40 دقيقة
+        if info.get("duration") and info["duration"] > 2400:
             raise Exception("الفيديو طويل جداً")
 
         filename = ydl.prepare_filename(info)
