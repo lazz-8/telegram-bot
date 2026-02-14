@@ -22,10 +22,13 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
 
-# يمكن تغييره من Railway Environment
 DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "@hos_ine")
 
 logging.basicConfig(level=logging.INFO)
+
+# ===== إنشاء FastAPI + Telegram =====
+app_fastapi = FastAPI()
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 # ===== حماية من السبام =====
 user_last_download = {}
@@ -82,31 +85,24 @@ def get_all_users():
     cursor.execute("SELECT user_id FROM users WHERE banned=0")
     return cursor.fetchall()
 
-# ===== تحميل الفيديو (نسخة قوية شاملة) =====
+# ===== تحميل الفيديو =====
 def download_video(url):
 
-    # تنظيف المجلد إذا كبر
     if os.path.exists("downloads") and len(os.listdir("downloads")) > 30:
         shutil.rmtree("downloads")
 
     os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        # أفضل فيديو + أفضل صوت ثم دمج
         'format': 'bv*+ba/best',
         'merge_output_format': 'mp4',
-
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
         'nocheckcertificate': True,
         'geo_bypass': True,
-
-        # إعادة المحاولة عند الخطأ
         'retries': 3,
         'fragment_retries': 3,
-
-        # تحسين دعم إنستغرام
         'http_headers': {
             'User-Agent': 'Mozilla/5.0'
         }
@@ -115,14 +111,11 @@ def download_video(url):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
-        # منع الفيديوهات الطويلة أكثر من 30 دقيقة (اختياري)
         if info.get("duration") and info["duration"] > 1800:
             raise Exception("الفيديو طويل جداً")
 
-        # الحصول على الاسم الحقيقي بعد الدمج
         filename = ydl.prepare_filename(info)
 
-        # إذا تم الدمج يتحول الامتداد إلى mp4
         if not filename.endswith(".mp4"):
             filename = os.path.splitext(filename)[0] + ".mp4"
 
@@ -191,7 +184,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 أنت محظور")
         return
 
-    # بث جماعي
     if context.user_data.get("broadcast") and user_id == ADMIN_ID:
         users = get_all_users()
         for user in users:
@@ -203,7 +195,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ تم الإرسال للجميع")
         return
 
-    # منع السبام
     current_time = datetime.now().timestamp()
     last_time = user_last_download.get(user_id, 0)
 
