@@ -14,7 +14,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
 
 # اسم مطور البوت للتواصل
-DEVELOPER_USERNAME = "@hos_ine"  # ضع هنا اسم حسابك على Telegram
+DEVELOPER_USERNAME = "@hos_ine"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -38,6 +38,10 @@ def get_users_count():
     cursor.execute("SELECT COUNT(*) FROM users")
     return cursor.fetchone()[0]
 
+def get_all_users():
+    cursor.execute("SELECT user_id, username, join_date FROM users")
+    return cursor.fetchall()
+
 # ===== تحميل الفيديو =====
 def download_video(url):
     if not os.path.exists("downloads"):
@@ -53,18 +57,12 @@ def download_video(url):
         info = ydl.extract_info(url, download=True)
         return ydl.prepare_filename(info)
 
-# ===== تعديل: لا تحقق اشتراك =====
-async def check_subscription(update, context):
-    # كل المستخدمين يعتبرون مشتركين
-    return True
-
 # ===== FastAPI =====
 app_fastapi = FastAPI()
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user.id, update.effective_user.username)
-    # رسالة البداية مع اسم مطور البوت
     await update.message.reply_text(
         f"🔥 أرسل رابط TikTok أو Instagram\n\n💡 لتطوير البوت أو التواصل:\n{DEVELOPER_USERNAME}"
     )
@@ -72,6 +70,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         await update.message.reply_text(f"📊 المستخدمين: {get_users_count()}")
+
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == ADMIN_ID:
+        users_list = get_all_users()
+
+        if not users_list:
+            await update.message.reply_text("لا يوجد مستخدمين بعد.")
+            return
+
+        message = "👥 قائمة المستخدمين:\n\n"
+
+        for user_id, username, join_date in users_list:
+            message += f"🆔 {user_id}\n"
+            message += f"👤 @{username if username else 'بدون يوزر'}\n"
+            message += f"📅 {join_date}\n\n"
+
+        await update.message.reply_text(message)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
@@ -89,6 +104,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("stats", stats))
+telegram_app.add_handler(CommandHandler("users", users))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 @app_fastapi.post("/webhook")
