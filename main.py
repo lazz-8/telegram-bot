@@ -126,6 +126,14 @@ def main_keyboard():
 
 # ===== أوامر =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    with open("intro.mp4", "rb") as video:
+        await context.bot.send_video(
+            chat_id=chat_id,
+            video=video,
+            caption="🎬 أهلاً بك في أقوى بوت تحميل 🔥\n\nأرسل رابط TikTok / Instagram / YouTube 🚀"
+        )
     user = update.effective_user
     add_user(user.id, user.username)
 
