@@ -31,7 +31,7 @@ telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 # ===== حماية من السبام =====
 user_last_download = {}
-DOWNLOAD_DELAY = 10
+DOWNLOAD_DELAY = 5
 
 # ===== قاعدة البيانات =====
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -80,11 +80,7 @@ def get_downloads():
     cursor.execute("SELECT downloads FROM stats WHERE rowid=1")
     return cursor.fetchone()[0]
 
-def get_all_users():
-    cursor.execute("SELECT user_id FROM users WHERE banned=0")
-    return cursor.fetchall()
-
-# ===== تحميل الفيديو (معدل لRailway) =====
+# ===== تحميل الفيديو (محسن لRailway + YouTube) =====
 def download_video(url):
 
     if os.path.exists("downloads") and len(os.listdir("downloads")) > 30:
@@ -93,23 +89,18 @@ def download_video(url):
     os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        # تحميل mp4 جاهز بدون دمج (حل مشكلة Railway)
         "format": "b[height<=720][ext=mp4]/best[ext=mp4]/best",
-
         "outtmpl": "downloads/%(id)s.%(ext)s",
         "noplaylist": True,
         "quiet": True,
         "retries": 15,
         "fragment_retries": 15,
         "concurrent_fragment_downloads": 5,
-
-        # تجاوز حماية يوتيوب
         "extractor_args": {
             "youtube": {
                 "player_client": ["android"]
             }
         },
-
         "http_headers": {
             "User-Agent": "Mozilla/5.0"
         }
@@ -121,19 +112,15 @@ def download_video(url):
         if info.get("duration") and info["duration"] > 2400:
             raise Exception("الفيديو طويل جداً")
 
-        filename = ydl.prepare_filename(info)
+        return ydl.prepare_filename(info)
 
-        if not filename.endswith(".mp4"):
-            filename = os.path.splitext(filename)[0] + ".mp4"
-
-        return filename
-
-# ===== لوحة تحكم =====
-def admin_keyboard():
+# ===== واجهة رئيسية =====
+def main_keyboard():
     keyboard = [
-        [InlineKeyboardButton("📊 الإحصائيات", callback_data="stats")],
-        [InlineKeyboardButton("📢 إذاعة", callback_data="broadcast")],
-        [InlineKeyboardButton("❌ إغلاق", callback_data="close")]
+        [InlineKeyboardButton("🎬 طريقة الاستخدام", callback_data="how")],
+        [InlineKeyboardButton("📊 الإحصائيات", callback_data="public_stats")],
+        [InlineKeyboardButton("👨‍💻 المطور", url=f"https://t.me/{DEVELOPER_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton("✖️ إغلاق", callback_data="close_start")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -146,37 +133,54 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 أنت محظور")
         return
 
-    await update.message.reply_text(
-        f"🔥 مرحبًا {user.first_name}\n\n"
-        "🎬 أرسل رابط TikTok / Instagram / YouTube\n\n"
-        "⚡ جودة تصل إلى 720p\n"
-        "⏳ انتظار 10 ثواني بين كل تحميل\n\n"
-        f"👨‍💻 المطور: {DEVELOPER_USERNAME}"
-    )
+    text = f"""
+╭━━━ 🎬 𝗩𝗜𝗗𝗘𝗢 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗥 ━━━╮
 
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_ID and update.effective_user.id == ADMIN_ID:
-        await update.message.reply_text(
-            "👑 لوحة تحكم الأدمن",
-            reply_markup=admin_keyboard()
-        )
+👋 أهلاً بك {user.first_name}
+
+📥 يدعم:
+• TikTok
+• Instagram
+• YouTube
+ 
+⚡جودة حتى 1080
+⏳ انتظار 5 ثواني بين كل تحميل
+
+╰━━━━━━━━━━━━━━━━━━╯
+"""
+
+    await update.message.reply_text(text, reply_markup=main_keyboard())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "stats":
+    if query.data == "how":
         await query.edit_message_text(
-            f"📊 عدد المستخدمين: {get_users_count()}\n"
-            f"📥 عدد التحميلات: {get_downloads()}",
-            reply_markup=admin_keyboard()
+            """
+🎬 طريقة الاستخدام:
+
+1️⃣ أرسل رابط فيديو مباشر  
+2️⃣ انتظر قليلاً  
+3️⃣ سيصلك الفيديو فوراً  
+
+⚡الجودة: 1080
+""",
+            reply_markup=main_keyboard()
         )
 
-    elif query.data == "broadcast":
-        await query.edit_message_text("📢 أرسل الرسالة الآن ليتم بثها")
-        context.user_data["broadcast"] = True
+    elif query.data == "public_stats":
+        await query.edit_message_text(
+            f"""
+📊 إحصائيات البوت:
 
-    elif query.data == "close":
+👥 المستخدمين: {get_users_count()}
+📥 التحميلات: {get_downloads()}
+""",
+            reply_markup=main_keyboard()
+        )
+
+    elif query.data == "close_start":
         await query.delete_message()
 
 # ===== معالجة الرسائل =====
@@ -186,17 +190,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_banned(user_id):
         await update.message.reply_text("🚫 أنت محظور")
-        return
-
-    if context.user_data.get("broadcast") and user_id == ADMIN_ID:
-        users = get_all_users()
-        for user in users:
-            try:
-                await context.bot.send_message(chat_id=user[0], text=update.message.text)
-            except:
-                pass
-        context.user_data["broadcast"] = False
-        await update.message.reply_text("✅ تم الإرسال للجميع")
         return
 
     current_time = datetime.now().timestamp()
@@ -217,21 +210,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             filename = await asyncio.to_thread(download_video, url)
-
             filesize = os.path.getsize(filename)
 
             with open(filename, "rb") as video:
                 if filesize < 50 * 1024 * 1024:
-                    await update.message.reply_video(
-                        video=video,
-                        supports_streaming=True,
-                        caption="✅ تم التحميل"
-                    )
+                    await update.message.reply_video(video=video, supports_streaming=True)
                 else:
-                    await update.message.reply_document(
-                        document=video,
-                        caption="✅ تم التحميل (كملف بسبب الحجم)"
-                    )
+                    await update.message.reply_document(document=video)
 
             os.remove(filename)
             increase_downloads()
@@ -245,7 +230,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== تسجيل =====
 telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("admin", admin_panel))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
