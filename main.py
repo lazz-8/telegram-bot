@@ -21,7 +21,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8000))
-
 DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "@hos_ine")
 
 logging.basicConfig(level=logging.INFO)
@@ -85,7 +84,7 @@ def get_all_users():
     cursor.execute("SELECT user_id FROM users WHERE banned=0")
     return cursor.fetchall()
 
-# ===== تحميل الفيديو =====
+# ===== تحميل الفيديو (معدل لRailway) =====
 def download_video(url):
 
     if os.path.exists("downloads") and len(os.listdir("downloads")) > 30:
@@ -94,33 +93,31 @@ def download_video(url):
     os.makedirs("downloads", exist_ok=True)
 
     ydl_opts = {
-        # أفضل جودة مناسبة بدون أحجام ضخمة
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        # تحميل mp4 جاهز بدون دمج (حل مشكلة Railway)
+        "format": "b[height<=720][ext=mp4]/best[ext=mp4]/best",
 
-        'merge_output_format': 'mp4',
-        'outtmpl': 'downloads/%(id)s.%(ext)s',
-        'noplaylist': True,
-        'quiet': True,
-        'nocheckcertificate': True,
-        'geo_bypass': True,
+        "outtmpl": "downloads/%(id)s.%(ext)s",
+        "noplaylist": True,
+        "quiet": True,
+        "retries": 15,
+        "fragment_retries": 15,
+        "concurrent_fragment_downloads": 5,
 
-        # تجنب مشاكل YouTube
-        'retries': 5,
-        'fragment_retries': 5,
-        'ignoreerrors': False,
+        # تجاوز حماية يوتيوب
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"]
+            }
+        },
 
-        # تقليل الجودة إذا كان الحجم كبير
-        'format_sort': ['res:720', 'ext:mp4:m4a'],
-
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0'
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0"
         }
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
-        # منع الفيديوهات الطويلة أكثر من 40 دقيقة
         if info.get("duration") and info["duration"] > 2400:
             raise Exception("الفيديو طويل جداً")
 
@@ -146,17 +143,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user.id, user.username)
 
     if is_banned(user.id):
-        await update.message.reply_text("🚫 أنت محظور من استخدام البوت")
+        await update.message.reply_text("🚫 أنت محظور")
         return
 
     await update.message.reply_text(
         f"🔥 مرحبًا {user.first_name}\n\n"
-        "🎬 أرسل رابط:\n"
-        "• TikTok\n"
-        "• Instagram\n"
-        "• YouTube\n\n"
-        "⚡ التحميل بجودة عالية\n"
-        "⏳ يوجد انتظار 10 ثواني بين كل تحميل\n\n"
+        "🎬 أرسل رابط TikTok / Instagram / YouTube\n\n"
+        "⚡ جودة تصل إلى 720p\n"
+        "⏳ انتظار 10 ثواني بين كل تحميل\n\n"
         f"👨‍💻 المطور: {DEVELOPER_USERNAME}"
     )
 
@@ -179,7 +173,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "broadcast":
-        await query.edit_message_text("📢 أرسل الرسالة الآن ليتم بثها لكل المستخدمين")
+        await query.edit_message_text("📢 أرسل الرسالة الآن ليتم بثها")
         context.user_data["broadcast"] = True
 
     elif query.data == "close":
@@ -224,12 +218,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             filename = await asyncio.to_thread(download_video, url)
 
+            filesize = os.path.getsize(filename)
+
             with open(filename, "rb") as video:
-                await update.message.reply_video(
-                    video=video,
-                    supports_streaming=True,
-                    caption="✅ تم التحميل بنجاح"
-                )
+                if filesize < 50 * 1024 * 1024:
+                    await update.message.reply_video(
+                        video=video,
+                        supports_streaming=True,
+                        caption="✅ تم التحميل"
+                    )
+                else:
+                    await update.message.reply_document(
+                        document=video,
+                        caption="✅ تم التحميل (كملف بسبب الحجم)"
+                    )
 
             os.remove(filename)
             increase_downloads()
